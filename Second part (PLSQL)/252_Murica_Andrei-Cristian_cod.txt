@@ -1,0 +1,523 @@
+-- 6
+-- Pentru un produs dat afisati id-urile furnizorilor si pretul cu care au aprovizionat 
+CREATE OR REPLACE PROCEDURE oferte(id_prod IN NUMBER) AS
+    TYPE stoc is table of marfa%rowtype;
+    TYPE tab_vec IS VARRAY(10) OF NUMBER;
+    v_toate_ofertele stoc;
+    ind NUMBER; 
+    id_furnizor tab_vec := tab_vec();
+    v_pret tab_vec := tab_vec();  
+    nu_exista_in_stoc EXCEPTION;
+BEGIN
+    SELECT * BULK COLLECT INTO v_toate_ofertele from marfa;
+    ind := 1;
+    FOR i in 1..v_toate_ofertele.COUNT loop
+        if v_toate_ofertele(i).produs_id = id_prod then
+            id_furnizor.extend();
+            id_furnizor(ind) :=v_toate_ofertele(i).furnizor_id;
+            v_pret.extend();
+            v_pret(ind) :=v_toate_ofertele(i).pret;
+            ind :=ind+1;
+        END IF;
+    END LOOP;
+    IF ind = 0 THEN
+        RAISE nu_exista_in_stoc;
+    end if;
+    DBMS_OUTPUT.PUT_LINE('Ofertele sunt:');
+    FOR i IN  1..id_furnizor.COUNT LOOP
+        DBMS_OUTPUT.PUT_LINE('Id-ul furnizor ' || id_furnizor(i) || ' Pret ' || v_pret(i));
+    END LOOP;
+    
+    EXCEPTION
+        WHEN nu_exista_in_stoc THEN
+            DBMS_OUTPUT.PUT_LINE('Nu exista produse cu id-ul ' || id_prod || 'in stoc');
+            
+END;
+
+BEGIN
+    oferte(1);
+    oferte(2);
+END;
+
+
+
+-- 7
+-- Pentru un client dat afisati denumirea fiecarui produs cumparat 
+-- Si sa se afiseze numele si pretul produselor din stock mai ieftine sau scumpe de 500
+create or replace PROCEDURE cumparate(id_client IN client.client_id%type, cerinta IN NUMBER) AS
+    cursor c_colet (id_client IN client.client_id%type) is --cursor paramterizat
+    select * from colet c
+    join comanda g on c.comanda_id = g.comanda_id
+    where g.client_id = id_client;
+    v_colet c_colet%rowtype;
+    nume produs.denumire%type;
+    TYPE stock_cursor IS REF CURSOR RETURN stock%ROWTYPE;
+    v_produs stock_cursor;
+    produsul stock%ROWTYPE;
+    date_invalide EXCEPTION;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('----------------');
+    if cerinta <> 2 and cerinta <> 1 then
+        RAISE date_invalide;
+    end if;
+    OPEN c_colet(id_client);
+    LOOP
+        FETCH c_colet INTO v_colet;
+        EXIT WHEN c_colet%NOTFOUND;
+        SELECT denumire into nume FROM produs p
+                    join stock s on p.produs_id =s.produs_id
+                    where s.stock_id = v_colet.stock_id;
+        DBMS_OUTPUT.PUT_LINE( nume);
+    END LOOP;
+    CLOSE c_colet;
+
+    DBMS_OUTPUT.PUT_LINE(' ');
+    IF cerinta = 1 THEN
+        OPEN v_produs FOR
+            SELECT * FROM stock WHERE pret > 500;
+        DBMS_OUTPUT.PUT_LINE('Numele si pretul produselor din stock mai scumpe de 500:');
+    ELSIF cerinta = 2 THEN
+        OPEN v_produs FOR
+            SELECT * FROM stock WHERE pret <= 500;
+        DBMS_OUTPUT.PUT_LINE('Numele si pretul produselor din stock mai ieftine de 500:');
+    END IF;
+
+
+    LOOP
+        FETCH v_produs INTO produsul;
+        EXIT WHEN v_produs%NOTFOUND;
+        SELECT denumire into nume FROM produs p
+                    join stock s on p.produs_id =s.produs_id
+                    where s.stock_id = produsul.stock_id;
+        DBMS_OUTPUT.PUT_LINE(nume  || '   ' ||  produsul.pret);
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('----------------');
+
+    EXCEPTION
+        WHEN date_invalide THEN
+            DBMS_OUTPUT.PUT_LINE('Cerinta invalida ');
+END;
+INSERT INTO magazin VALUES(6, 'Bucuresti', 'Piata unirii 3');
+
+BEGIN
+    cumparate(1,1);
+    cumparate(1,3);
+    cumparate(4,2);
+END;
+
+
+-- 8
+-- Pentru un id dat al unui magazin sa se returneze produsul cu numele cel mai scurt
+CREATE OR REPLACE FUNCTION cel_mai_lung_nume(p_id_magazin IN magazin.magazin_id%type) RETURN VARCHAR2 AS
+    cursor v_cursor is
+    SELECT p.denumire
+        FROM produs p
+        join stock s on p.produs_id = s.produs_id
+        join magazin m on m.magazin_id = s.magazin_id
+        WHERE m.magazin_id = p_id_magazin;
+    mx NUMBER;
+    nr_magazin number;
+    dnm produs.denumire%TYPE;
+    prd produs.denumire%TYPE;
+    nu_sunt_produse EXCEPTION;
+    magazin_invalid EXCEPTION;
+BEGIN
+    SELECT count (magazin.magazin_id) INTO nr_magazin from magazin where magazin.magazin_id=p_id_magazin;
+    if nr_magazin=0 then
+        raise magazin_invalid;
+    end if;
+    OPEN v_cursor;
+    mx := 0;
+    LOOP
+        FETCH v_cursor INTO prd;
+        EXIT WHEN v_cursor%NOTFOUND;
+        if LENGTH(prd)>mx then
+            mx :=LENGTH(prd);
+            dnm :=prd;
+        END if;
+    END LOOP;
+    close v_cursor;
+    if mx = 0 then
+        raise nu_sunt_produse;
+    end if;
+    RETURN dnm;
+    
+    EXCEPTION
+        WHEN nu_sunt_produse THEN
+            DBMS_OUTPUT.PUT_LINE('Nu sunt produse in magazin');
+            RETURN NULL;
+        WHEN magazin_invalid THEN
+            DBMS_OUTPUT.PUT_LINE('NU exista magazin cu ID-ul: ' || p_id_magazin);
+            RETURN NULL;
+END;
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE(cel_mai_lung_nume(1));
+    DBMS_OUTPUT.PUT_LINE(cel_mai_lung_nume(2));
+    DBMS_OUTPUT.PUT_LINE(cel_mai_lung_nume(5));
+    DBMS_OUTPUT.PUT_LINE(cel_mai_lung_nume(6));
+    DBMS_OUTPUT.PUT_LINE(cel_mai_lung_nume(10));
+END;
+        
+-- 9
+-- Pentru un nume dat al unui client sa se afiseze toate produsele cumparate de acesta si numele complet (nume, prenume)
+CREATE OR REPLACE PROCEDURE produse_cumparate(p_nume_client IN VARCHAR2) AS
+    cursor v_cursor is
+    SELECT p.denumire
+        FROM produs p
+        join stock s on p.produs_id = s.produs_id
+        join colet c on c.stock_id = s.stock_id
+        join comanda co on c.comanda_id = co.comanda_id
+        join client cl on cl.client_id = co.client_id
+        WHERE cl.nume=p_nume_client;
+    nr_clienti number;
+    mx NUMBER;
+    prd produs.denumire%TYPE;
+    prenume_client client.nume%TYPE;
+    nu_sunt_produse EXCEPTION;
+    nume_invalid EXCEPTION;
+    prea_multi_clienti EXCEPTION;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('----------------');
+    SELECT count (client.client_id) INTO nr_clienti from client where client.nume=p_nume_client;
+    if nr_clienti=0 then
+        raise nume_invalid;
+    end if;
+    if nr_clienti <> 1 then
+        raise prea_multi_clienti;
+    end if;
+    mx :=0;
+    OPEN v_cursor;
+    SELECT client.prenume into prenume_client FROM  client where client.nume=p_nume_client;
+    LOOP
+        FETCH v_cursor INTO prd;
+        EXIT WHEN v_cursor%NOTFOUND;
+        if mx=0 then
+            DBMS_OUTPUT.PUT_LINE(p_nume_client || ' ' || prenume_client || ' a cumparat :');
+        END IF;
+        mx := mx+1;
+        DBMS_OUTPUT.PUT_LINE(prd);
+    END LOOP;
+    close v_cursor;
+    if mx = 0 then
+        raise nu_sunt_produse;
+    end if;
+    
+    EXCEPTION
+        WHEN prea_multi_clienti THEN
+            DBMS_OUTPUT.PUT_LINE('Sunt mai multi clienti cu numele de familie : ' || p_nume_client);
+            RETURN;
+        WHEN nume_invalid THEN
+            DBMS_OUTPUT.PUT_LINE('NU exista client cu numele: ' || p_nume_client);
+            RETURN;
+        WHEN nu_sunt_produse THEN
+            DBMS_OUTPUT.PUT_LINE('Clientul ' || p_nume_client || ' nu a cumparat nimic');
+            RETURN;
+END;
+
+BEGIN
+    produse_cumparate('Popescu');
+    produse_cumparate('Murica');
+    produse_cumparate('Alex');
+    produse_cumparate('Grigore');
+END;
+
+
+-- 10
+-- Daca nr de produse din depozit a depasit 175 nu pot fi aduse altele (cantitate_produs)
+CREATE OR REPLACE TRIGGER t_stock
+    BEFORE INSERT ON stock
+DECLARE
+    nr NUMBER;
+BEGIN
+    SELECT sum (cantitate_produs) into nr FROM stock;
+    IF nr > 175 THEN
+        RAISE_APPLICATION_ERROR(-20001, 'Nu mai este loc in depozit');
+    END IF;
+END;
+
+
+SELECT sum (cantitate_produs) FROM stock; -- numar actual  153
+begin
+    INSERT INTO stock VALUES(11,  5, 5, 17,  40, 700);
+    INSERT INTO stock VALUES(12, 5, 5, 20, 43, 450);
+    INSERT INTO stock VALUES(13, 1, 3, 15,  37, 550);
+END;
+
+
+-- 11
+-- Nu poate fi modificata data de infiintare a unei echipe
+CREATE OR REPLACE TRIGGER t_angajat
+    BEFORE UPDATE OF data_angajare ON angajat
+    FOR EACH ROW
+    when (NEW.data_angajare != OLD.data_angajare)
+BEGIN
+    RAISE_APPLICATION_ERROR(-20001, 'Nu se poate modifica data angajarii');
+END;
+
+
+BEGIN
+    UPDATE angajat SET data_angajare = '04-DEC-22' WHERE angajat_id =1;
+END;
+
+
+--12
+CREATE TABLE istoric
+    (username VARCHAR2(10),
+    event VARCHAR2(10),
+    data TIMESTAMP(3));
+
+SELECT * FROM istoric;
+ 
+CREATE OR REPLACE TRIGGER t_istoric
+  AFTER CREATE OR DROP OR ALTER OR SERVERERROR ON DATABASE
+BEGIN
+    If(DBMS_UTILITY.FORMAT_ERROR_STACK is null)THEN
+        INSERT INTO istoric
+        VALUES (SYS.LOGIN_USER, SYS.SYSEVENT,SYSTIMESTAMP);
+    ELSE
+        RAISE_APPLICATION_ERROR(-20001,'EROARE');
+    END IF;
+ 
+END;
+
+DROP TRIGGER trigger_ex12;
+
+CREATE TABLE test (id NUMBER(10));
+INSERT INTO test VALUES ('abc');
+DROP TABLE test;
+
+
+--13
+CREATE OR REPLACE PACKAGE pachet AS
+    PROCEDURE oferte(id_prod IN NUMBER);
+    PROCEDURE cumparate(id_client IN client.client_id%type, cerinta IN NUMBER);
+    FUNCTION cel_mai_lung_nume(p_id_magazin IN magazin.magazin_id%type) RETURN VARCHAR2 ;
+    PROCEDURE produse_cumparate(p_nume_client IN VARCHAR2);
+END pachet;
+
+CREATE OR REPLACE PACKAGE BODY pachet AS
+-- 6
+-- Pentru un produs dat afisati id-urile furnizorilor si pretul cu care au aprovizionat 
+  PROCEDURE oferte(id_prod IN NUMBER) AS
+    TYPE stoc is table of marfa%rowtype;
+    TYPE tab_vec IS VARRAY(10) OF NUMBER;
+    v_toate_ofertele stoc;
+    ind NUMBER; 
+    id_furnizor tab_vec := tab_vec();
+    v_pret tab_vec := tab_vec();  
+    nu_exista_in_stoc EXCEPTION;
+BEGIN
+    SELECT * BULK COLLECT INTO v_toate_ofertele from marfa;
+    ind := 1;
+    FOR i in 1..v_toate_ofertele.COUNT loop
+        if v_toate_ofertele(i).produs_id = id_prod then
+            id_furnizor.extend();
+            id_furnizor(ind) :=v_toate_ofertele(i).furnizor_id;
+            v_pret.extend();
+            v_pret(ind) :=v_toate_ofertele(i).pret;
+            ind :=ind+1;
+        END IF;
+    END LOOP;
+    IF ind = 0 THEN
+        RAISE nu_exista_in_stoc;
+    end if;
+    DBMS_OUTPUT.PUT_LINE('Ofertele sunt:');
+    FOR i IN  1..id_furnizor.COUNT LOOP
+        DBMS_OUTPUT.PUT_LINE('Id-ul furnizor ' || id_furnizor(i) || ' Pret ' || v_pret(i));
+    END LOOP;
+    
+    EXCEPTION
+        WHEN nu_exista_in_stoc THEN
+            DBMS_OUTPUT.PUT_LINE('Nu exista produse cu id-ul ' || id_prod || 'in stoc');
+            
+END;
+
+
+
+
+-- 7
+-- Pentru un client dat afisati denumirea fiecarui produs cumparat 
+-- Si sa se afiseze numele si pretul produselor din stock mai ieftine sau scumpe de 500
+  PROCEDURE cumparate(id_client IN client.client_id%type, cerinta IN NUMBER) AS
+    cursor c_colet (id_client IN client.client_id%type) is --cursor paramterizat
+    select * from colet c
+    join comanda g on c.comanda_id = g.comanda_id
+    where g.client_id = id_client;
+    v_colet c_colet%rowtype;
+    nume produs.denumire%type;
+    TYPE stock_cursor IS REF CURSOR RETURN stock%ROWTYPE;
+    v_produs stock_cursor;
+    produsul stock%ROWTYPE;
+    date_invalide EXCEPTION;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('----------------');
+    if cerinta <> 2 and cerinta <> 1 then
+        RAISE date_invalide;
+    end if;
+    OPEN c_colet(id_client);
+    LOOP
+        FETCH c_colet INTO v_colet;
+        EXIT WHEN c_colet%NOTFOUND;
+        SELECT denumire into nume FROM produs p
+                    join stock s on p.produs_id =s.produs_id
+                    where s.stock_id = v_colet.stock_id;
+        DBMS_OUTPUT.PUT_LINE( nume);
+    END LOOP;
+    CLOSE c_colet;
+
+    DBMS_OUTPUT.PUT_LINE(' ');
+    IF cerinta = 1 THEN
+        OPEN v_produs FOR
+            SELECT * FROM stock WHERE pret > 500;
+        DBMS_OUTPUT.PUT_LINE('Numele si pretul produselor din stock mai scumpe de 500:');
+    ELSIF cerinta = 2 THEN
+        OPEN v_produs FOR
+            SELECT * FROM stock WHERE pret <= 500;
+        DBMS_OUTPUT.PUT_LINE('Numele si pretul produselor din stock mai ieftine de 500:');
+    END IF;
+
+
+    LOOP
+        FETCH v_produs INTO produsul;
+        EXIT WHEN v_produs%NOTFOUND;
+        SELECT denumire into nume FROM produs p
+                    join stock s on p.produs_id =s.produs_id
+                    where s.stock_id = produsul.stock_id;
+        DBMS_OUTPUT.PUT_LINE(nume  || '   ' ||  produsul.pret);
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('----------------');
+
+    EXCEPTION
+        WHEN date_invalide THEN
+            DBMS_OUTPUT.PUT_LINE('Cerinta invalida ');
+END;
+
+-- 8
+-- Pentru un id dat al unui magazin sa se returneze produsul cu numele cel mai scurt
+FUNCTION cel_mai_lung_nume(p_id_magazin IN magazin.magazin_id%type) RETURN VARCHAR2 AS
+    cursor v_cursor is
+    SELECT p.denumire
+        FROM produs p
+        join stock s on p.produs_id = s.produs_id
+        join magazin m on m.magazin_id = s.magazin_id
+        WHERE m.magazin_id = p_id_magazin;
+    mx NUMBER;
+    nr_magazin number;
+    dnm produs.denumire%TYPE;
+    prd produs.denumire%TYPE;
+    nu_sunt_produse EXCEPTION;
+    magazin_invalid EXCEPTION;
+BEGIN
+    SELECT count (magazin.magazin_id) INTO nr_magazin from magazin where magazin.magazin_id=p_id_magazin;
+    if nr_magazin=0 then
+        raise magazin_invalid;
+    end if;
+    OPEN v_cursor;
+    mx := 0;
+    LOOP
+        FETCH v_cursor INTO prd;
+        EXIT WHEN v_cursor%NOTFOUND;
+        if LENGTH(prd)>mx then
+            mx :=LENGTH(prd);
+            dnm :=prd;
+        END if;
+    END LOOP;
+    close v_cursor;
+    if mx = 0 then
+        raise nu_sunt_produse;
+    end if;
+    RETURN dnm;
+    
+    EXCEPTION
+        WHEN nu_sunt_produse THEN
+            DBMS_OUTPUT.PUT_LINE('Nu sunt produse in magazin');
+            RETURN NULL;
+        WHEN magazin_invalid THEN
+            DBMS_OUTPUT.PUT_LINE('NU exista magazin cu ID-ul: ' || p_id_magazin);
+            RETURN NULL;
+END;
+
+
+-- 9
+-- Pentru un nume dat al unui client sa se afiseze toate produsele cumparate de acesta si numele complet (nume, prenume)
+  PROCEDURE produse_cumparate(p_nume_client IN VARCHAR2) AS
+    cursor v_cursor is
+    SELECT p.denumire
+        FROM produs p
+        join stock s on p.produs_id = s.produs_id
+        join colet c on c.stock_id = s.stock_id
+        join comanda co on c.comanda_id = co.comanda_id
+        join client cl on cl.client_id = co.client_id
+        WHERE cl.nume=p_nume_client;
+    nr_clienti number;
+    mx NUMBER;
+    prd produs.denumire%TYPE;
+    prenume_client client.nume%TYPE;
+    nu_sunt_produse EXCEPTION;
+    nume_invalid EXCEPTION;
+    prea_multi_clienti EXCEPTION;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('----------------');
+    SELECT count (client.client_id) INTO nr_clienti from client where client.nume=p_nume_client;
+    if nr_clienti=0 then
+        raise nume_invalid;
+    end if;
+    if nr_clienti <> 1 then
+        raise prea_multi_clienti;
+    end if;
+    mx :=0;
+    OPEN v_cursor;
+    SELECT client.prenume into prenume_client FROM  client where client.nume=p_nume_client;
+    LOOP
+        FETCH v_cursor INTO prd;
+        EXIT WHEN v_cursor%NOTFOUND;
+        if mx=0 then
+            DBMS_OUTPUT.PUT_LINE(p_nume_client || ' ' || prenume_client || ' a cumparat :');
+        END IF;
+        mx := mx+1;
+        DBMS_OUTPUT.PUT_LINE(prd);
+    END LOOP;
+    close v_cursor;
+    if mx = 0 then
+        raise nu_sunt_produse;
+    end if;
+    
+    EXCEPTION
+        WHEN prea_multi_clienti THEN
+            DBMS_OUTPUT.PUT_LINE('Sunt mai multi clienti cu numele de familie : ' || p_nume_client);
+            RETURN;
+        WHEN nume_invalid THEN
+            DBMS_OUTPUT.PUT_LINE('NU exista client cu numele: ' || p_nume_client);
+            RETURN;
+        WHEN nu_sunt_produse THEN
+            DBMS_OUTPUT.PUT_LINE('Clientul ' || p_nume_client || ' nu a cumparat nimic');
+            RETURN;
+END;
+
+END pachet;
+
+BEGIN
+    pachet.oferte(1);
+    pachet.oferte(2);
+
+    DBMS_OUTPUT.PUT_LINE('');
+    pachet.cumparate(1,1);
+    pachet.cumparate(1,3);
+    pachet.cumparate(4,2);
+    
+        DBMS_OUTPUT.PUT_LINE('');
+
+    DBMS_OUTPUT.PUT_LINE(pachet.cel_mai_lung_nume(1));
+    DBMS_OUTPUT.PUT_LINE(pachet.cel_mai_lung_nume(2));
+    DBMS_OUTPUT.PUT_LINE(pachet.cel_mai_lung_nume(5));
+    DBMS_OUTPUT.PUT_LINE(pachet.cel_mai_lung_nume(6));
+    DBMS_OUTPUT.PUT_LINE(pachet.cel_mai_lung_nume(10));
+
+        DBMS_OUTPUT.PUT_LINE('');
+
+    pachet.produse_cumparate('Popescu');
+    pachet.produse_cumparate('Murica');
+    pachet.produse_cumparate('Alex');
+    pachet.produse_cumparate('Grigore');
+END;
